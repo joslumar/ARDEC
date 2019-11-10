@@ -1,9 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE eagle SYSTEM "eagle.dtd">
-<eagle version="6.6.0">
+<eagle version="9.1.2">
 <drawing>
 <settings>
 <setting alwaysvectorfont="no"/>
+<setting keepoldvectorfont="yes"/>
 <setting verticaltext="up"/>
 </settings>
 <grid distance="0.1" unitdist="inch" unit="inch" style="lines" multiple="1" display="no" altdistance="0.01" altunitdist="inch" altunit="inch"/>
@@ -9403,7 +9404,7 @@ Source: &lt;a href="http://www.farnell.com/datasheets/391100.pdf"&gt; Data sheet
 <instance part="JP1" gate="G$1" x="38.1" y="111.76"/>
 <instance part="SUPPLY11" gate="GND" x="71.12" y="60.96"/>
 <instance part="R3" gate="G$1" x="60.96" y="60.96" rot="R90"/>
-<instance part="R4" gate="G$1" x="66.04" y="53.34" rot="R90"/>
+<instance part="R4" gate="G$1" x="66.04" y="58.42" rot="R90"/>
 <instance part="D2" gate="1" x="-38.1" y="-10.16" rot="R90"/>
 <instance part="C4" gate="G$1" x="-7.62" y="-7.62"/>
 <instance part="IC5" gate="A1" x="-25.4" y="-5.08"/>
@@ -9866,16 +9867,6 @@ Source: &lt;a href="http://www.farnell.com/datasheets/391100.pdf"&gt; Data sheet
 <wire x1="111.76" y1="40.64" x2="111.76" y2="-25.4" width="0.1524" layer="91"/>
 </segment>
 </net>
-<net name="IO3" class="0">
-<segment>
-<pinref part="IC4" gate="G$1" pin="PD3(INT1)"/>
-<wire x1="15.24" y1="48.26" x2="55.88" y2="48.26" width="0.1524" layer="91"/>
-<wire x1="55.88" y1="48.26" x2="55.88" y2="76.2" width="0.1524" layer="91"/>
-<label x="25.4" y="48.26" size="1.6764" layer="95"/>
-<pinref part="BUTTONS" gate="A" pin="5"/>
-<wire x1="55.88" y1="76.2" x2="78.74" y2="76.2" width="0.1524" layer="91"/>
-</segment>
-</net>
 <net name="IO2" class="0">
 <segment>
 <pinref part="IC4" gate="G$1" pin="PD2(INT0)"/>
@@ -9980,7 +9971,7 @@ Source: &lt;a href="http://www.farnell.com/datasheets/391100.pdf"&gt; Data sheet
 <wire x1="15.24" y1="33.02" x2="66.04" y2="33.02" width="0.1524" layer="91"/>
 <label x="25.4" y="33.02" size="1.6764" layer="95"/>
 <pinref part="R4" gate="G$1" pin="1"/>
-<wire x1="66.04" y1="33.02" x2="66.04" y2="48.26" width="0.1524" layer="91"/>
+<wire x1="66.04" y1="33.02" x2="66.04" y2="53.34" width="0.1524" layer="91"/>
 </segment>
 </net>
 <net name="AD2" class="0">
@@ -10020,7 +10011,7 @@ Source: &lt;a href="http://www.farnell.com/datasheets/391100.pdf"&gt; Data sheet
 <net name="N$9" class="0">
 <segment>
 <pinref part="R4" gate="G$1" pin="2"/>
-<wire x1="66.04" y1="58.42" x2="66.04" y2="68.58" width="0.1524" layer="91"/>
+<wire x1="66.04" y1="63.5" x2="66.04" y2="68.58" width="0.1524" layer="91"/>
 <pinref part="BUTTONS" gate="A" pin="8"/>
 <wire x1="66.04" y1="68.58" x2="78.74" y2="68.58" width="0.1524" layer="91"/>
 </segment>
@@ -10057,17 +10048,6 @@ Source: &lt;a href="http://www.farnell.com/datasheets/391100.pdf"&gt; Data sheet
 <wire x1="-33.02" y1="91.44" x2="-33.02" y2="96.52" width="0.1524" layer="91"/>
 </segment>
 </net>
-<net name="IO10/SS" class="0">
-<segment>
-<pinref part="IC1" gate="G$1" pin="2A"/>
-<wire x1="116.84" y1="50.8" x2="124.46" y2="50.8" width="0.1524" layer="91"/>
-<wire x1="101.6" y1="50.8" x2="116.84" y2="50.8" width="0.1524" layer="91"/>
-<pinref part="IC4" gate="G$1" pin="PB2(SS/OC1B)"/>
-<wire x1="15.24" y1="27.94" x2="101.6" y2="27.94" width="0.1524" layer="91"/>
-<label x="25.4" y="27.94" size="1.6764" layer="95"/>
-<wire x1="101.6" y1="50.8" x2="101.6" y2="27.94" width="0.1524" layer="91"/>
-</segment>
-</net>
 <net name="IO7" class="0">
 <segment>
 <pinref part="IC4" gate="G$1" pin="PD7(AIN1)"/>
@@ -10080,7 +10060,6 @@ Source: &lt;a href="http://www.farnell.com/datasheets/391100.pdf"&gt; Data sheet
 <net name="IO13/SCK" class="0">
 <segment>
 <pinref part="ICSP" gate="A" pin="3"/>
-<wire x1="104.14" y1="20.32" x2="86.36" y2="20.32" width="0.1524" layer="91"/>
 <pinref part="IC4" gate="G$1" pin="PB5(SCK)"/>
 <wire x1="86.36" y1="20.32" x2="58.42" y2="20.32" width="0.1524" layer="91"/>
 <wire x1="15.24" y1="20.32" x2="17.78" y2="20.32" width="0.1524" layer="91"/>
@@ -10094,10 +10073,10 @@ Source: &lt;a href="http://www.farnell.com/datasheets/391100.pdf"&gt; Data sheet
 <label x="25.4" y="20.32" size="1.6764" layer="95"/>
 <pinref part="LED1" gate="G$1" pin="A"/>
 <wire x1="86.36" y1="20.32" x2="86.36" y2="10.16" width="0.1524" layer="91"/>
+<pinref part="IC1" gate="G$1" pin="2A"/>
+<wire x1="124.46" y1="50.8" x2="86.36" y2="50.8" width="0.1524" layer="91"/>
+<wire x1="86.36" y1="50.8" x2="86.36" y2="20.32" width="0.1524" layer="91"/>
 <junction x="86.36" y="20.32"/>
-<wire x1="104.14" y1="20.32" x2="104.14" y2="-10.16" width="0.1524" layer="91"/>
-<pinref part="IC2" gate="G$1" pin="2A"/>
-<wire x1="104.14" y1="-10.16" x2="124.46" y2="-10.16" width="0.1524" layer="91"/>
 </segment>
 </net>
 <net name="N$12" class="0">
@@ -10146,6 +10125,26 @@ Source: &lt;a href="http://www.farnell.com/datasheets/391100.pdf"&gt; Data sheet
 <wire x1="-45.72" y1="-5.08" x2="-38.1" y2="-5.08" width="0.1524" layer="91"/>
 <junction x="-45.72" y="-5.08"/>
 <junction x="-38.1" y="-5.08"/>
+</segment>
+</net>
+<net name="N$15" class="0">
+<segment>
+<pinref part="IC4" gate="G$1" pin="PD3(INT1)"/>
+<wire x1="15.24" y1="48.26" x2="96.52" y2="48.26" width="0.1524" layer="91"/>
+<wire x1="96.52" y1="48.26" x2="96.52" y2="-10.16" width="0.1524" layer="91"/>
+<pinref part="IC2" gate="G$1" pin="2A"/>
+<wire x1="96.52" y1="-10.16" x2="124.46" y2="-10.16" width="0.1524" layer="91"/>
+</segment>
+</net>
+<net name="IO10/SS" class="0">
+<segment>
+<label x="25.4" y="48.26" size="1.6764" layer="95"/>
+<pinref part="IC4" gate="G$1" pin="PB2(SS/OC1B)"/>
+<wire x1="15.24" y1="27.94" x2="58.42" y2="27.94" width="0.1524" layer="91"/>
+<label x="25.4" y="27.94" size="1.6764" layer="95"/>
+<wire x1="58.42" y1="76.2" x2="58.42" y2="27.94" width="0.1524" layer="91"/>
+<pinref part="BUTTONS" gate="A" pin="5"/>
+<wire x1="58.42" y1="76.2" x2="78.74" y2="76.2" width="0.1524" layer="91"/>
 </segment>
 </net>
 </nets>

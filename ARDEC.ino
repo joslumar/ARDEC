@@ -11,12 +11,16 @@
  *
  ******************************************************************************************************************************/
 
+#define _VERSION "2.0"
 
-#include <TimerOne.h> // Ojo, que me cargo las salidas PWM 9 y 10
-// ... y mas ojo, que si activo el serial.print altero el temporizador ... o quizs el tratamiento de interrupciones
-// o si no, mira el control de los motores con el osciloscopio o el analizador lgoico
+#include <TimerOne.h> // Ojo, que me cargo las salidas PWM 9 y 10 (timer1)
+// ... y mas ojo, que si activo el serial.print altero el temporizador ... o quizas el tratamiento de interrupciones
+// o si no, mira el control de los motores con el osciloscopio o el analizador logico
 //#include <EEPROM.h>
 
+//#define _CALIBRATE
+#define _AR_MOTOR_DEBUG  0
+#define _DEC_MOTOR_DEBUG 0
 
 #define B_AR_UP    0b0010
 #define B_AR_DOWN  0b0001
@@ -26,29 +30,39 @@
 #define B_AR       0b0011
 #define B_DEC      0b1100
 
-#define AR_MICROSTEPS 8 // 4 8
-#define AR_ULTIMOPASO (AR_MICROSTEPS - 1)
-
-#define DEC_MICROSTEPS 8 // 4 8
-#define DEC_ULTIMOPASO (DEC_MICROSTEPS - 1)
+// microsteps table
+// octave:
+// n=128; A=[round(sin([0:n/2-1]*pi/n*2)*255), zeros(1,n/2)]; A
+// MS=16 ; B=[]; for i = 0:MS-1 ; B=[B A(i*n/MS+1)] ; endfor ; 
+#define MAXMICROSTEPS 32 // son 128 micropasos / ciclo
+volatile const byte pwmStepsTable[MAXMICROSTEPS<<1]={
+  0,  13,  25,  37,  50,  62,  74,  86,
+  98, 109, 120, 131, 142, 152, 162, 171,
+  180, 189, 197, 205, 212, 219, 225, 231,
+  236, 240, 244, 247, 250, 252, 254, 255,
+  255, 255, 254, 252, 250, 247, 244, 240,
+  236, 231, 225, 219, 212, 205, 197, 189,
+  180, 171, 162, 152, 142, 131, 120, 109,
+  98 ,  86,  74,  62,  50,  37,  25,  13
+};
 
 #define MAXRELAX_DEC  250
 
 #define PIN_INFO_LED    8
 #define PIN_PWR_LED     7
 
-#define PIN_BOBINA_AR_1A 11 // PWM
-#define PIN_BOBINA_AR_1B 13 // PWM
-#define PIN_BOBINA_AR_2A 5  // PWM
-#define PIN_BOBINA_AR_2B 6  // PWM
+#define PIN_BOBINA_AR_1A 11 // PWM  timer 2
+#define PIN_BOBINA_AR_1B 3  // PWM  timer 2
+#define PIN_BOBINA_AR_2A 5  // PWM  timer 0
+#define PIN_BOBINA_AR_2B 6  // PWM  timer 0
 
 #define PIN_BOBINA_DEC_1A  4   // no PWM
-#define PIN_BOBINA_DEC_1B  10  // no PWM
-#define PIN_BOBINA_DEC_2A  9   // no PWM
+#define PIN_BOBINA_DEC_1B  13  // no PWM
+#define PIN_BOBINA_DEC_2A  9   // no PWM (broken by TimerOne, timer1)
 #define PIN_BOBINA_DEC_2B  12  // no PWM
 
 
-#define PIN_AR_UP    3    // AR+
+#define PIN_AR_UP   10    // AR+   O10 PWM broken by TimerOne, timer1
 #define PIN_AR_DOWN A4    // AR-
 #define PIN_DEC_UP  A5    // DEC+
 #define PIN_DEC_DOWN 2    // DEC-
@@ -62,7 +76,11 @@
 #define NORTH 0
 #define SOUTH 1
 
+#define AR_MOTOR 0
+#define DEC_MOTOR 1
+
 /*
+ **** Original Synta motors:
  Motor Step Angle: 7.5 degrees => 48 steps / turn
  Motor Gear Ratio: 120:1
  Worm Gear Ratio:  144:1
@@ -86,17 +104,44 @@
  max speed = 8x => tick =  6.4926 ms  // mitad de consumo que single step  <- tamaños de pulso en AR de 155,832ms(H) y 259,720ms(L)
  max speed = 16x => tick =  3.2462 ms // no lo aguanta el motor de la EQ5
  max speed = 32x => tick =  1.6231 ms // no lo aguanta el motor de la EQ5
+
+ **** 17HS13-0404S1 1.8 deg/step
+
+ Pulley Gear Ratio: 4:1
+ Worm Gear Ratio:  144:1
+
+ 1 step = 11.25 arcseg 
+ 1/8 step = 1.40625 arcseg  (DEC)  Analog outputs
+ 1/16 step = .703125 arcseg (AR)   PWM outputs
+
+ single step: 
+ sidereal time (t step) = 750 ms
+
+ 1/16 step: 
+ sidereal time (t step) = 46.875 ms
+ max speed = 32x => tick =  1.6231 ms = 1623 us
+ max speed = 64x => tick =  0.732421875 ms = 732 us
+
  */
 
-#define SPEED_MAX  8
-#define TICK_USEC 6493+2 // half step 8x
-////#define TICK_USEC 12985+0 // single step 8x
+/***** synta ****
+#define SPEED_MAX  32
+#define TICK_USEC 6493+2 // half step 8x // 6493+2 <- correccion
+unsigned int AR_microSteps  = 2; // 8 pasos por ciclo
+unsigned int DEC_microSteps = 2; // 8 pasos por ciclo
+/*****/
+
+/***** 17HS13-0404S1 *****/
+#define SPEED_MAX  32
+#define TICK_USEC 1623 // 1/16 step, 32x
+#define AR_MICROSTEPS 16
+unsigned int AR_microSteps = AR_MICROSTEPS; // 64 pasos por ciclo
+unsigned int DEC_microSteps = 2; // 64 pasos por ciclo
+/******/
 
 // deberia poder corregir el decimal del tamaño preciso de tick haciendo perder un tick de vez en cuando
 
 volatile unsigned long ticks = 0;
-volatile unsigned long dec_ticks = 0;
-volatile unsigned long ar_ticks = 0;
 
 volatile boolean interrupting_t1 = false;
 
@@ -104,11 +149,8 @@ volatile boolean hemisphere = NORTH; // NORTH SOUTH
 volatile byte motion_speed  = 4;   // 2, 4, 8
 volatile boolean superspeed = false;
 
-volatile boolean priomotion_ar = false;   // motor AR a toda leche
-volatile boolean priomotion_dec = false;  // motor DEC a toda leche
-
-volatile short int paso_AR  = 0;  // 0 .. AR_ULTIMOPASO
-volatile short int paso_DEC = 0;  // 0 .. DEC_ULTIMOPASO
+volatile short int step_AR  = 0;  // 0 .. AR_ULTIMOPASO
+volatile short int step_DEC = 0;  // 0 .. DEC_ULTIMOPASO
 
 volatile int delay_tick_ar;  // tiempo muerto mientras espera el siguiente slot tick para cumplir con la velocidad del mando
 volatile int delay_tick_dec; // tiempo muerto mientras espera el siguiente slot tick para cumplir con la velocidad del mando
@@ -119,6 +161,8 @@ volatile int ar_targetPos  = 0;   // paso deseado del motor AR
 volatile int dec_targetPos = 0;   // paso deseado del motor DEC
 
 volatile int relax_dec = 0;          // solo relajo el DEC
+
+char tmp_str[256]; // resulting string limited to 256 chars
 
 int pulsado;
 int boton;
@@ -144,252 +188,213 @@ void relaja_motores() {
   relaja_motor_DEC();
 }
 
-//---------------------------------------------------------------------------
-//---------- AR MOTOR
-
-#if (AR_MICROSTEPS == 4)
-void excita_motor_AR(int paso) {
-  switch(paso) {
+// pasos completos
+void doMotorStep4(int step, int pin_1A, int pin_1B, int pin_2A, int pin_2B)
+{
+  switch(step)
+  {
   case 0:         //paso 0
-    digitalWrite(PIN_BOBINA_AR_1A, LOW);
-    digitalWrite(PIN_BOBINA_AR_1B, HIGH);  
-    digitalWrite(PIN_BOBINA_AR_2A, HIGH);
-    digitalWrite(PIN_BOBINA_AR_2B, LOW);
-    break;
+    digitalWrite(pin_1A, HIGH);
+    digitalWrite(pin_1B, LOW);
+    digitalWrite(pin_2A, HIGH);
+    digitalWrite(pin_2B, LOW);
+    break;        
   case 1:         //paso 1
-    digitalWrite(PIN_BOBINA_AR_1A, LOW);
-    digitalWrite(PIN_BOBINA_AR_1B, HIGH);  
-    digitalWrite(PIN_BOBINA_AR_2A, LOW);
-    digitalWrite(PIN_BOBINA_AR_2B, HIGH);
-    break;
+    digitalWrite(pin_1A, HIGH);
+    digitalWrite(pin_1B, LOW);
+    digitalWrite(pin_2A, LOW);
+    digitalWrite(pin_2B, HIGH);
+    break;        
   case 2:         //paso 2
-    digitalWrite(PIN_BOBINA_AR_1A, HIGH);
-    digitalWrite(PIN_BOBINA_AR_1B, LOW);  
-    digitalWrite(PIN_BOBINA_AR_2A, LOW);
-    digitalWrite(PIN_BOBINA_AR_2B, HIGH);
-    break;
+    digitalWrite(pin_1A, LOW); 
+    digitalWrite(pin_1B, HIGH);
+    digitalWrite(pin_2A, LOW);
+    digitalWrite(pin_2B, HIGH);
+    break;        
   case 3:         //paso 3
-    digitalWrite(PIN_BOBINA_AR_1A, HIGH);
-    digitalWrite(PIN_BOBINA_AR_1B, LOW);  
-    digitalWrite(PIN_BOBINA_AR_2A, HIGH);
-    digitalWrite(PIN_BOBINA_AR_2B, LOW);
+    digitalWrite(pin_1A, LOW); 
+    digitalWrite(pin_1B, HIGH);
+    digitalWrite(pin_2A, HIGH);
+    digitalWrite(pin_2B, LOW);
     break;
   }
 }
 
-#elif (AR_MICROSTEPS == 8)
 // medios pasos
-void excita_motor_AR(int paso) {
-  switch(paso) {
+void doMotorStep8(int step, int pin_1A, int pin_1B, int pin_2A, int pin_2B)
+{
+  switch(step)
+  {
   case 0:         //paso 0
-    digitalWrite(PIN_BOBINA_AR_1A, LOW);
-    digitalWrite(PIN_BOBINA_AR_1B, HIGH);
-    digitalWrite(PIN_BOBINA_AR_2A, HIGH);
-    digitalWrite(PIN_BOBINA_AR_2B, LOW);
-    break;
+    digitalWrite(pin_1A, HIGH);
+    digitalWrite(pin_1B, LOW);
+    digitalWrite(pin_2A, HIGH);
+    digitalWrite(pin_2B, LOW);
+    break;        
   case 1:         //paso 1
-    digitalWrite(PIN_BOBINA_AR_1A, LOW);
-    digitalWrite(PIN_BOBINA_AR_1B, HIGH);  
-    digitalWrite(PIN_BOBINA_AR_2A, LOW);
-    digitalWrite(PIN_BOBINA_AR_2B, LOW);
+    digitalWrite(pin_1A, HIGH);
+    digitalWrite(pin_1B, LOW);
+    digitalWrite(pin_2A, LOW);
+    digitalWrite(pin_2B, LOW);
     break;
   case 2:         //paso 2
-    digitalWrite(PIN_BOBINA_AR_1A, LOW);
-    digitalWrite(PIN_BOBINA_AR_1B, HIGH);  
-    digitalWrite(PIN_BOBINA_AR_2A, LOW);
-    digitalWrite(PIN_BOBINA_AR_2B, HIGH);
+    digitalWrite(pin_1A, HIGH);
+    digitalWrite(pin_1B, LOW);
+    digitalWrite(pin_2A, LOW);
+    digitalWrite(pin_2B, HIGH);
     break;
   case 3:         //paso 3
-    digitalWrite(PIN_BOBINA_AR_1A, LOW);
-    digitalWrite(PIN_BOBINA_AR_1B, LOW);  
-    digitalWrite(PIN_BOBINA_AR_2A, LOW);
-    digitalWrite(PIN_BOBINA_AR_2B, HIGH);
+    digitalWrite(pin_1A, LOW);
+    digitalWrite(pin_1B, LOW);
+    digitalWrite(pin_2A, LOW);
+    digitalWrite(pin_2B, HIGH);
     break;
   case 4:         //paso 4
-    digitalWrite(PIN_BOBINA_AR_1A, HIGH);
-    digitalWrite(PIN_BOBINA_AR_1B, LOW);  
-    digitalWrite(PIN_BOBINA_AR_2A, LOW);
-    digitalWrite(PIN_BOBINA_AR_2B, HIGH);
+    digitalWrite(pin_1A, LOW);
+    digitalWrite(pin_1B, HIGH);
+    digitalWrite(pin_2A, LOW);
+    digitalWrite(pin_2B, HIGH);
     break;
   case 5:         //paso 5
-    digitalWrite(PIN_BOBINA_AR_1A, HIGH);
-    digitalWrite(PIN_BOBINA_AR_1B, LOW);  
-    digitalWrite(PIN_BOBINA_AR_2A, LOW);
-    digitalWrite(PIN_BOBINA_AR_2B, LOW);
+    digitalWrite(pin_1A, LOW);
+    digitalWrite(pin_1B, HIGH);
+    digitalWrite(pin_2A, LOW);
+    digitalWrite(pin_2B, LOW);
     break;
   case 6:         //paso 6
-    digitalWrite(PIN_BOBINA_AR_1A, HIGH);
-    digitalWrite(PIN_BOBINA_AR_1B, LOW);  
-    digitalWrite(PIN_BOBINA_AR_2A, HIGH);
-    digitalWrite(PIN_BOBINA_AR_2B, LOW);
+    digitalWrite(pin_1A, LOW);
+    digitalWrite(pin_1B, HIGH);
+    digitalWrite(pin_2A, HIGH);
+    digitalWrite(pin_2B, LOW);
     break;
   case 7:         //paso 7
-    digitalWrite(PIN_BOBINA_AR_1A, LOW);
-    digitalWrite(PIN_BOBINA_AR_1B, LOW);  
-    digitalWrite(PIN_BOBINA_AR_2A, HIGH);
-    digitalWrite(PIN_BOBINA_AR_2B, LOW);
+    digitalWrite(pin_1A, LOW);
+    digitalWrite(pin_1B, LOW);
+    digitalWrite(pin_2A, HIGH);
+    digitalWrite(pin_2B, LOW);
     break;
   }
 }
+
+// devuelve el valor de la potencia de pulso para la posicion del micropaso absoluto pos
+int getpwmbyStep(int pos, int microSteps) {
+
+  pos = pos % (microSteps<<2); // microSteps => 1 cuadrante => x4
+  if (pos == 0)
+    pos = microSteps<<2;
+
+  unsigned int index = ((pos - 1) * MAXMICROSTEPS) / microSteps;
+  return ( index < (MAXMICROSTEPS<<1) ? pwmStepsTable[index] : 0 );  // solo tengo medio cuadrante en el array, el resto es cero
+}
+
+void doMotorStep(int step, unsigned int microSteps, char motor)
+{
+  int pin_1A, pin_1B, pin_2A, pin_2B;
+       
+  switch (motor) {
+     case AR_MOTOR:
+       pin_1A = PIN_BOBINA_AR_1A;
+       pin_1B = PIN_BOBINA_AR_1B;
+       pin_2A = PIN_BOBINA_AR_2A;
+       pin_2B = PIN_BOBINA_AR_2B;
+       break;
+    case DEC_MOTOR:
+       pin_1A = PIN_BOBINA_DEC_1A;
+       pin_1B = PIN_BOBINA_DEC_1B;
+       pin_2A = PIN_BOBINA_DEC_2A;
+       pin_2B = PIN_BOBINA_DEC_2B;
+       break;
+  }
+  if (microSteps>2) {
+    analogWrite(pin_1A, getpwmbyStep(step, microSteps));
+    analogWrite(pin_1B, getpwmbyStep(step + (microSteps<<1) , microSteps )); // microSteps * 2 ; microSteps => 1 cuadrante
+    analogWrite(pin_2A, getpwmbyStep(step +  microSteps     , microSteps )); // microSteps
+    analogWrite(pin_2B, getpwmbyStep(step +  microSteps * 3 , microSteps )); // microSteps * 3
+
+#if _AR_MOTOR_DEBUG || _DEC_MOTOR_DEBUG
+    if (motor == AR_MOTOR && _AR_MOTOR_DEBUG) {
+       sprintf( tmp_str, "AR(%03u:%03u:%03u:%03u)",
+         getpwmbyStep(step, microSteps),getpwmbyStep(step+(microSteps<<1), microSteps),
+         getpwmbyStep(step+microSteps, microSteps), getpwmbyStep(step+microSteps*3, microSteps));
+       Serial.print(tmp_str);
+     }
+    else if (motor == DEC_MOTOR && _DEC_MOTOR_DEBUG ) {
+       sprintf( tmp_str, "DEC(%03u:%03u:%03u:%03u)",
+         getpwmbyStep(step, microSteps),getpwmbyStep(step+(microSteps<<1), microSteps),
+         getpwmbyStep(step+microSteps, microSteps), getpwmbyStep(step+microSteps*3, microSteps));
+       Serial.print(tmp_str);
+    }
 #endif
-
-//---------------------------------------------------------------------------
-//---------- DEC MOTOR
-
-#if (DEC_MICROSTEPS == 4)
-void excita_motor_DEC(int paso) {
-  switch(paso) {
-  case 0:         //paso 0
-    digitalWrite(PIN_BOBINA_DEC_1A, LOW);
-    digitalWrite(PIN_BOBINA_DEC_1B, HIGH);  
-    digitalWrite(PIN_BOBINA_DEC_2A, HIGH);
-    digitalWrite(PIN_BOBINA_DEC_2B, LOW);
-    break;
-  case 1:         //paso 1
-    digitalWrite(PIN_BOBINA_DEC_1A, LOW);
-    digitalWrite(PIN_BOBINA_DEC_1B, HIGH);  
-    digitalWrite(PIN_BOBINA_DEC_2A, LOW);
-    digitalWrite(PIN_BOBINA_DEC_2B, HIGH);
-    break;
-  case 2:         //paso 2
-    digitalWrite(PIN_BOBINA_DEC_1A, HIGH);
-    digitalWrite(PIN_BOBINA_DEC_1B, LOW);  
-    digitalWrite(PIN_BOBINA_DEC_2A, LOW);
-    digitalWrite(PIN_BOBINA_DEC_2B, HIGH);
-    break;
-  case 3:         //paso 3
-    digitalWrite(PIN_BOBINA_DEC_1A, HIGH);
-    digitalWrite(PIN_BOBINA_DEC_1B, LOW);  
-    digitalWrite(PIN_BOBINA_DEC_2A, HIGH);
-    digitalWrite(PIN_BOBINA_DEC_2B, LOW);
-    break;
+  }
+  else if (microSteps==2) {
+    doMotorStep8(step, pin_1A, pin_1B, pin_2A, pin_2B);
+  }
+  else if (microSteps==1) {
+    doMotorStep4(step, pin_1A, pin_1B, pin_2A, pin_2B);
   }
 }
 
-#elif (DEC_MICROSTEPS == 8)
-// medios pasos
-void excita_motor_DEC(int paso) {
-  switch(paso) {
-  case 0:         //paso 0
-    digitalWrite(PIN_BOBINA_DEC_1A, LOW);
-    digitalWrite(PIN_BOBINA_DEC_1B, HIGH);
-    digitalWrite(PIN_BOBINA_DEC_2A, HIGH);
-    digitalWrite(PIN_BOBINA_DEC_2B, LOW);
-    break;
-  case 1:         //paso 1
-    digitalWrite(PIN_BOBINA_DEC_1A, LOW);
-    digitalWrite(PIN_BOBINA_DEC_1B, HIGH);  
-    digitalWrite(PIN_BOBINA_DEC_2A, LOW);
-    digitalWrite(PIN_BOBINA_DEC_2B, LOW);
-    break;
-  case 2:         //paso 2
-    digitalWrite(PIN_BOBINA_DEC_1A, LOW);
-    digitalWrite(PIN_BOBINA_DEC_1B, HIGH);  
-    digitalWrite(PIN_BOBINA_DEC_2A, LOW);
-    digitalWrite(PIN_BOBINA_DEC_2B, HIGH);
-    break;
-  case 3:         //paso 3
-    digitalWrite(PIN_BOBINA_DEC_1A, LOW);
-    digitalWrite(PIN_BOBINA_DEC_1B, LOW);  
-    digitalWrite(PIN_BOBINA_DEC_2A, LOW);
-    digitalWrite(PIN_BOBINA_DEC_2B, HIGH);
-    break;
-  case 4:         //paso 4
-    digitalWrite(PIN_BOBINA_DEC_1A, HIGH);
-    digitalWrite(PIN_BOBINA_DEC_1B, LOW);  
-    digitalWrite(PIN_BOBINA_DEC_2A, LOW);
-    digitalWrite(PIN_BOBINA_DEC_2B, HIGH);
-    break;
-  case 5:         //paso 5
-    digitalWrite(PIN_BOBINA_DEC_1A, HIGH);
-    digitalWrite(PIN_BOBINA_DEC_1B, LOW);  
-    digitalWrite(PIN_BOBINA_DEC_2A, LOW);
-    digitalWrite(PIN_BOBINA_DEC_2B, LOW);
-    break;
-  case 6:         //paso 6
-    digitalWrite(PIN_BOBINA_DEC_1A, HIGH);
-    digitalWrite(PIN_BOBINA_DEC_1B, LOW);  
-    digitalWrite(PIN_BOBINA_DEC_2A, HIGH);
-    digitalWrite(PIN_BOBINA_DEC_2B, LOW);
-    break;
-  case 7:         //paso 7
-    digitalWrite(PIN_BOBINA_DEC_1A, LOW);
-    digitalWrite(PIN_BOBINA_DEC_1B, LOW);  
-    digitalWrite(PIN_BOBINA_DEC_2A, HIGH);
-    digitalWrite(PIN_BOBINA_DEC_2B, LOW);
-    break;
-  }
-}
-#endif
 
-//-----------------------------------------------------------------------
-
-int siguiente_paso_AR(int sentido) {
-  int rc=0;
-
+int calcARMotorStep(int sentido) {
   switch (hemisphere) {
   case NORTH:
     if ( sentido ) {
-      if ( paso_AR < AR_ULTIMOPASO )
-        paso_AR++;
+      if ( step_AR < (AR_microSteps<<2) - 1 )
+        step_AR++;
       else
-        paso_AR = 0;
+        step_AR = 0;
 
       ar_motorPos++;
     }
     else {
-      if ( paso_AR > 0 )
-        paso_AR--;
+      if ( step_AR > 0 )
+        step_AR--;
       else
-        paso_AR = AR_ULTIMOPASO;
+        step_AR = (AR_microSteps<<2) - 1; 
 
       ar_motorPos--;
     }
     break;
   case SOUTH:
     if ( sentido ) {
-      if ( paso_AR > 0 )
-        paso_AR--;
+      if ( step_AR > 0 )
+        step_AR--;
       else
-        paso_AR = AR_ULTIMOPASO;
+        step_AR = (AR_microSteps<<2) - 1; 
 
       ar_motorPos++;
     }
     else {
-      if ( paso_AR < AR_ULTIMOPASO )
-        paso_AR++;
+      if ( step_AR < (AR_microSteps<<2) - 1 )
+        step_AR++;
       else
-        paso_AR = 0;
+        step_AR = 0;
 
       ar_motorPos--;
     }
     break;
   }
-  rc = 1;
-  return(rc);
+  return(1); // future AR limits setup
 }
 
-int siguiente_paso_DEC(int sentido) {
-  int rc=0;
-
+int calcDECMotorStep(int sentido) {
   if ( sentido ) {
-    if ( paso_DEC < DEC_ULTIMOPASO )
-      paso_DEC++;
+    if ( step_DEC < (DEC_microSteps<<2) - 1 )
+      step_DEC++;
     else
-      paso_DEC = 0;
+      step_DEC = 0;
 
     dec_motorPos++;
   }
   else {
-    if ( paso_DEC > 0 )
-      paso_DEC--;
+    if ( step_DEC > 0 )
+      step_DEC--;
     else
-      paso_DEC = DEC_ULTIMOPASO;
+      step_DEC = (DEC_microSteps<<2) - 1;
 
     dec_motorPos--;
   }
-  rc = 1;
-  return(rc);
+  return(1); // future DEC limits setup
 }
 
 
@@ -411,12 +416,12 @@ void interrup_t1() {
     }
     //---------------- MOTOR AR
     //
-    if ( delay_tick_ar == 0 || priomotion_ar ) { // no hay que esperar mas
+    if ( delay_tick_ar == 0 ) { // no hay que esperar mas a slot
       delay_tick_ar =  SPEED_MAX/motion_speed - 1;  // velocidad 8x => no espera (11111111) ; velocidad 2x => espera 3 (10001000)
       diff_ar = ar_targetPos - ar_motorPos;
       if ( diff_ar ) { // si hay pasos pendientes, mueve el motor
-        if ( siguiente_paso_AR( diff_ar >0 ) == 1 )  { // calcula siguiente paso AR
-          excita_motor_AR(paso_AR); // mueve al siguiente paso AR
+        if ( calcARMotorStep( diff_ar >0 ) == 1 )  { // calcula siguiente paso AR
+          doMotorStep(step_AR, AR_microSteps, AR_MOTOR); // mueve al siguiente paso AR
         }
         diff_ar = ar_targetPos - ar_motorPos; // vuelve a calcular pasos pendientes
         /*
@@ -428,23 +433,24 @@ void interrup_t1() {
          */
       }
     }
-    else { // hay que esperar
+    else { // hay que esperar al slot
       if ( delay_tick_ar ) {
         delay_tick_ar--;
       }
     }
     //---------------- MOTOR DEC
     //
-    if ( delay_tick_dec == 0 || priomotion_dec ) {  // tick es cero o movimiento prioritario
+    if ( delay_tick_dec == 0 ) {  // delay tick es cero, no hay que esperar slot
       delay_tick_dec =  SPEED_MAX/motion_speed - 1;  // velocidad 8x => no espera (11111111) ; velocidad 2x => espera 3 (10001000)
       diff_dec = dec_targetPos - dec_motorPos; // calcula ticks pendientes
       if ( diff_dec ) {  // si hay pasos pendientes, mueve el motor
-        if ( siguiente_paso_DEC( diff_dec > 0 ) == 1 ) { // calcula siguiente paso de motor DEC
-          excita_motor_DEC(paso_DEC); // mueve al siguiente paso de motor DEC
+        if ( calcDECMotorStep( diff_dec > 0 ) == 1 ) { // calcula siguiente paso de motor DEC
+          doMotorStep(step_DEC, DEC_microSteps, DEC_MOTOR); // mueve al siguiente paso de motor DEC
         }
         diff_dec = dec_targetPos - dec_motorPos;  // vuelve a calcular pasos pendientes
-        /*
-        Serial.print("DEC:"); 
+         /*
+         Serial.print("DEC:");
+         Serial.print(" "); 
          Serial.print(ticks);
          Serial.print(" "); 
          Serial.print(diff_dec); 
@@ -480,12 +486,14 @@ void interrup_t1() {
   // stty -F /dev/ttyUSB0 raw ;  ts "%.s" < /dev/ttyUSB0  | \
   // awk 'BEGIN {t=0} ; {if (t==0) {s=$1;t=$3} else {print "s:"$1" t:"$3" T:"($1-s)/($3-t)*1000}}'
 
+#ifdef _CALIBRATE
   if( ticks % 1000 == 0) { // cada 1000 ticks 
-    Serial.print(millis());
+    Serial.print(millis()); // OJO con el cambio de frecuencia del timer0 !!!
     Serial.print(" ");
     Serial.print(ticks);
-    Serial.print("\n"); 
+    Serial.print("\n");
   }
+#endif
 
   ticks++;
   interrupting_t1 = false; // fin interrupcion
@@ -583,7 +591,8 @@ void botonera() {
     break;
   }
 
-  if (( boton & B_AR)) {
+  if ( boton & B_AR ) {
+    AR_microSteps = 2;
     if ( !pulsado ) {     // no estaba pulsado antes
       ar_prio = true;
     }
@@ -599,9 +608,8 @@ void botonera() {
      */
     if ( boton == B_AR )
       superspeed=true;
-    else  
+    else
       superspeed=false;
-
   } 
   else if ( boton & B_DEC ) {
     if ( !pulsado ) {      // no estaba pulsado antes
@@ -632,12 +640,18 @@ void botonera() {
     else
       digitalWrite(PIN_INFO_LED, LOW);   // turn the LED off
 
-    pulsado = false;
+    pulsado = false;    
     superspeed=false;
+    AR_microSteps = AR_MICROSTEPS;
   }
 }
 
 void setup() {
+
+  // initialize serial communication:
+  Serial.begin(9600L);
+  Serial.print(_VERSION);
+  Serial.print("\n");
 
   // initialize the buttons pin as a input:
   pinMode(PIN_DEC_UP, INPUT);
@@ -654,6 +668,32 @@ void setup() {
   digitalWrite(PIN_SPEED0, HIGH);
   pinMode(PIN_SPEED1, INPUT);
   digitalWrite(PIN_SPEED1, HIGH);
+
+
+  /**
+  Timer0 TCCR0B
+  Setting	Divisor	Frequency
+  0x01	1	62500
+  0x02	8	7812.5
+  0x03	64	976.5625
+  0x04	256	244.140625
+  0x05	1024	61.03515625
+  
+  Timer1/2 TCCR1B/TCCR2B
+  Setting	Divisor	Frequency
+  0x01	1	31250
+  0x02	8	3906.25
+  0x03	32	976.5625
+  0x04	64	488.28125
+  0x05	128	244.140625
+  0x06	256	122.0703125
+  0x07	1024	30.517578125
+  **/
+ 
+#ifndef _CALIBRATE
+  TCCR0B = TCCR0B & 0b11111000 | 0x02; // Timer0
+  TCCR2B = TCCR1B & 0b11111000 | 0x02;  // Timer2
+#endif
 
   // initialize the LEDs as an output
   pinMode(PIN_PWR_LED, OUTPUT);  
@@ -678,15 +718,13 @@ void setup() {
   else
     hemisphere = SOUTH;
 
-  excita_motor_AR(paso_AR);
-  excita_motor_DEC(paso_DEC);
+  doMotorStep(step_AR, AR_microSteps, AR_MOTOR);
+  doMotorStep(step_DEC, DEC_microSteps, DEC_MOTOR);
 
   // initialize timer1
   Timer1.initialize(TICK_USEC); // Note that this breaks analogWrite() for digital pins 9 and 10 on Arduino.
   Timer1.attachInterrupt(interrup_t1);
 
-  // initialize serial communication:
-  Serial.begin(9600L);
   digitalWrite(PIN_INFO_LED, HIGH);   // turn the LED off
   delay(500);  
   digitalWrite(PIN_INFO_LED, LOW);   // turn the LED off
