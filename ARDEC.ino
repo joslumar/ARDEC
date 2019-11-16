@@ -13,12 +13,62 @@
 
 #define _VERSION "2.0"
 
+#include <Arduino.h>
 #include <TimerOne.h> // Ojo, que me cargo las salidas PWM 9 y 10 (timer1)
 // ... y mas ojo, que si activo el serial.print altero el temporizador ... o quizas el tratamiento de interrupciones
 // o si no, mira el control de los motores con el osciloscopio o el analizador logico
 //#include <EEPROM.h>
 
-//#define _CALIBRATE
+/**
+  Timer0 TCCR0B pin5,6 millis(),  8bits => 256 values // FastPWM mode
+  Setting       Divisor Frequency
+  0x01  1       62500
+  0x02  8       7812.5
+  0x03  64      976.5625 <- default
+  0x04  256     244.140625
+  0x05  1024    61.03515625
+  
+  Timer1 TCCR1B, 16bits => 65536 values
+  Setting       Divisor Frequency
+  0x01  1       244.1406250
+  0x02  8       30.517578125
+  0x03  64
+  0x04  256
+  0x05  1024
+
+  Timer2 TCCR2B, pin3,11  8bits => 256 values // FastPWM mode
+  Setting       Divisor Frequency
+  0x01  1       62500
+  0x02  8       7812.5
+  0x03  32      1953.125
+  0x04  64      976.5625
+  0x05  128     488.28125
+  0x06  256     244.140625
+  0x07  1024    61.03515625
+**/
+#define TIMERSPRESCALER 8 // 1 8
+
+#if TIMERSPRESCALER == 1
+#define TIMERPRESCALER0_VALUE B001
+#define TIMERPRESCALER2_VALUE B001
+#elif TIMERSPRESCALER == 8
+#define TIMERPRESCALER0_VALUE B010
+#define TIMERPRESCALER2_VALUE B010
+#elif TIMERSPRESCALER == 64
+#define TIMERPRESCALER0_VALUE B011
+#define TIMERPRESCALER2_VALUE B100
+#endif
+
+#define millis() ( millis() / TIMERSPRESCALER )
+#define micros() ( micros() / TIMERSPRESCALER )
+
+#define CLK_ADJ .00325025137544227536
+#define compensated_millis() ( millis() +  (float(millis()) * CLK_ADJ ) )
+#define compensated_micros() ( micros() +  (float(micros()) * CLK_ADJ ) )
+
+
+#define _CALIBRATE
+
 #define _AR_MOTOR_DEBUG  0
 #define _DEC_MOTOR_DEBUG 0
 
@@ -118,9 +168,9 @@ volatile const byte pwmStepsTable[MAXMICROSTEPS<<1]={
  sidereal time (t step) = 750 ms
 
  1/16 step: 
- sidereal time (t step) = 46.875 ms
- max speed = 32x => tick =  1.6231 ms = 1623 us
- max speed = 64x => tick =  0.732421875 ms = 732 us
+ sidereal time (t step) = 46.875 ms (STEP_USEC)
+ max speed = 32x => tick =  1.46484375 ms = 1464.84375 us (TICK_USEC)
+ max speed = 64x => tick =  0.732421875 ms = 732.421875 us
 
  */
 
@@ -132,14 +182,14 @@ unsigned int DEC_microSteps = 2; // 8 pasos por ciclo
 /*****/
 
 /***** 17HS13-0404S1 *****/
-#define SPEED_MAX  32
-#define TICK_USEC 1623 // 1/16 step, 32x
+#define SPEED_MAX 32
+#define STEP_USEC 46875
+#define TICK_USEC STEP_USEC/SPEED_MAX // 1/16 step, 32x
 #define AR_MICROSTEPS 16
 unsigned int AR_microSteps = AR_MICROSTEPS; // 64 pasos por ciclo
 unsigned int DEC_microSteps = 2; // 64 pasos por ciclo
 /******/
 
-// deberia poder corregir el decimal del tamaño preciso de tick haciendo perder un tick de vez en cuando
 
 volatile unsigned long ticks = 0;
 
@@ -155,10 +205,10 @@ volatile short int step_DEC = 0;  // 0 .. DEC_ULTIMOPASO
 volatile int delay_tick_ar;  // tiempo muerto mientras espera el siguiente slot tick para cumplir con la velocidad del mando
 volatile int delay_tick_dec; // tiempo muerto mientras espera el siguiente slot tick para cumplir con la velocidad del mando
 
-volatile int ar_motorPos   = 0;   // paso en curso del motor AR
-volatile int dec_motorPos  = 0;   // paso en curso del motor DEC
-volatile int ar_targetPos  = 0;   // paso deseado del motor AR
-volatile int dec_targetPos = 0;   // paso deseado del motor DEC
+volatile long int ar_motorPos   = 0;   // paso en curso del motor AR
+volatile long int dec_motorPos  = 0;   // paso en curso del motor DEC
+volatile long int ar_targetPos  = 0;   // paso deseado del motor AR
+volatile long int dec_targetPos = 0;   // paso deseado del motor DEC
 
 volatile int relax_dec = 0;          // solo relajo el DEC
 
@@ -335,7 +385,7 @@ void doMotorStep(int step, unsigned int microSteps, char motor)
 }
 
 
-int calcARMotorStep(int sentido) {
+int calcARMotorStep(bool sentido) {
   switch (hemisphere) {
   case NORTH:
     if ( sentido ) {
@@ -377,7 +427,7 @@ int calcARMotorStep(int sentido) {
   return(1); // future AR limits setup
 }
 
-int calcDECMotorStep(int sentido) {
+int calcDECMotorStep(bool sentido) {
   if ( sentido ) {
     if ( step_DEC < (DEC_microSteps<<2) - 1 )
       step_DEC++;
@@ -400,20 +450,30 @@ int calcDECMotorStep(int sentido) {
 
 ///-----------------------
 
+
+volatile unsigned long last_ar_step = 0;
+volatile unsigned long last_compensated_micros = 0;
+
 void interrup_t1() {
   int diff_ar = 0;
   int diff_dec = 0;
+  unsigned long this_last_ar_step;
+  unsigned long this_compensated_micros;
 
   if (!interrupting_t1) {
     interrupting_t1 = true;
 
-    if ( ticks % SPEED_MAX == 0) {   // sidereal (vel max 8x), un slot de 8
-      ar_targetPos++;
-      //Serial.print("T:"); 
-      //Serial.print(ticks); 
-      //Serial.print("\n");
-      delay_tick_ar = 0; // ya!
+//    if ( ticks % SPEED_MAX == 0) {   // sidereal (vel max 8x), un slot de 8
+
+    this_compensated_micros = compensated_micros(); // prevents long (32bits) overflow
+    this_last_ar_step = (unsigned long) ( this_compensated_micros / (long) STEP_USEC ); // o'clock to move
+    if ( this_last_ar_step > last_ar_step || this_compensated_micros < last_compensated_micros ) {
+       last_ar_step = this_last_ar_step;
+       last_compensated_micros = this_compensated_micros;
+       ar_targetPos++;
+       delay_tick_ar = 0; // ya!
     }
+    
     //---------------- MOTOR AR
     //
     if ( delay_tick_ar == 0 ) { // no hay que esperar mas a slot
@@ -484,13 +544,21 @@ void interrup_t1() {
 
   // calibracion
   // stty -F /dev/ttyUSB0 raw ;  ts "%.s" < /dev/ttyUSB0  | \
-  // awk 'BEGIN {t=0} ; {if (t==0) {s=$1;t=$3} else {print "s:"$1" t:"$3" T:"($1-s)/($3-t)*1000}}'
+  // awk 'BEGIN {t=0} ; ! /V/ {if (t==0) {s=$1;t=$3} else {print "s:"$1" t:"$3" T:"($1-s)/($3-t)*1000}}'
 
 #ifdef _CALIBRATE
   if( ticks % 1000 == 0) { // cada 1000 ticks 
     Serial.print(millis()); // OJO con el cambio de frecuencia del timer0 !!!
     Serial.print(" ");
     Serial.print(ticks);
+    Serial.print(" ");
+    Serial.print(micros());
+    Serial.print(" ");
+    Serial.print((unsigned long)compensated_micros());
+    Serial.print(" ");
+    Serial.print(last_ar_step);
+    Serial.print(" ");
+    Serial.print(ar_targetPos);
     Serial.print("\n");
   }
 #endif
@@ -509,7 +577,7 @@ void stopDEC() {
   dec_targetPos = dec_motorPos;
 }
 
-void moveAR(byte sentido,int steps,boolean prio) {
+void moveAR(bool sentido,int steps,boolean prio) {
   switch( sentido ) {
   case UP:
     ar_targetPos += steps;
@@ -523,7 +591,7 @@ void moveAR(byte sentido,int steps,boolean prio) {
 
 }
 
-void moveDEC(byte sentido,int steps,boolean prio) {
+void moveDEC(bool sentido,int steps,boolean prio) {
   switch( sentido ) {
   case UP:
     dec_targetPos += steps;
@@ -565,7 +633,7 @@ byte speed_switches() {
   }
 }
 
-volatile byte sentido_ar, sentido_dec;
+volatile bool sentido_ar, sentido_dec;
 void botonera() {
   boolean ar_prio = false, dec_prio = false;
 
@@ -650,6 +718,7 @@ void setup() {
 
   // initialize serial communication:
   Serial.begin(9600L);
+  Serial.print("V:"); 
   Serial.print(_VERSION);
   Serial.print("\n");
 
@@ -670,31 +739,11 @@ void setup() {
   digitalWrite(PIN_SPEED1, HIGH);
 
 
-  /**
-  Timer0 TCCR0B
-  Setting	Divisor	Frequency
-  0x01	1	62500
-  0x02	8	7812.5
-  0x03	64	976.5625
-  0x04	256	244.140625
-  0x05	1024	61.03515625
-  
-  Timer1/2 TCCR1B/TCCR2B
-  Setting	Divisor	Frequency
-  0x01	1	31250
-  0x02	8	3906.25
-  0x03	32	976.5625
-  0x04	64	488.28125
-  0x05	128	244.140625
-  0x06	256	122.0703125
-  0x07	1024	30.517578125
-  **/
- 
-#ifndef _CALIBRATE
-  TCCR0B = TCCR0B & 0b11111000 | 0x02; // Timer0
-  TCCR2B = TCCR1B & 0b11111000 | 0x02;  // Timer2
-#endif
+  TCCR0B = TCCR0B & 0b11111000 | TIMERPRESCALER0_VALUE; // Timer0
+  TCCR2B = TCCR2B & 0b11111000 | TIMERPRESCALER2_VALUE;  // Timer2
 
+  TCCR2A = _BV(COM2A1) | _BV(COM2B1) | _BV(WGM21) | _BV(WGM20); // FastPWM Timer2 (256 values)
+  
   // initialize the LEDs as an output
   pinMode(PIN_PWR_LED, OUTPUT);  
   digitalWrite(PIN_PWR_LED, LOW);   // turn the LED off
@@ -739,4 +788,3 @@ void loop() {
 // Local Variables:
 // mode: c++
 // End:
-
