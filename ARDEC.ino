@@ -62,7 +62,7 @@
 #define millis() ( millis() / TIMERSPRESCALER )
 #define micros() ( micros() / TIMERSPRESCALER )
 
-#define CLK_ADJ 1.02358
+#define CLK_ADJ 1.02458 // 1.0236 // 1.0243
 #define compensated_millis() ( millis() * CLK_ADJ ) 
 #define compensated_micros() ( micros() * CLK_ADJ )
 
@@ -724,6 +724,8 @@ void setup() {
   Serial.begin(9600L);
   Serial.print("V:"); 
   Serial.print(_VERSION);
+  Serial.print(" CLK_ADJ:"); 
+  Serial.print(CLK_ADJ,8);
   Serial.print("\n");
 
   // initialize the buttons pin as a input:
