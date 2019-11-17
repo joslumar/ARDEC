@@ -11,7 +11,7 @@
  *
  ******************************************************************************************************************************/
 
-#define _VERSION "2.0"
+#define _VERSION "2.1"
 
 #include <Arduino.h>
 #include <TimerOne.h> // Ojo, que me cargo las salidas PWM 9 y 10 (timer1)
@@ -62,10 +62,9 @@
 #define millis() ( millis() / TIMERSPRESCALER )
 #define micros() ( micros() / TIMERSPRESCALER )
 
-#define CLK_ADJ .00325025137544227536
-#define compensated_millis() ( millis() +  (float(millis()) * CLK_ADJ ) )
-#define compensated_micros() ( micros() +  (float(micros()) * CLK_ADJ ) )
-
+#define CLK_ADJ 1.02358
+#define compensated_millis() ( millis() * CLK_ADJ ) 
+#define compensated_micros() ( micros() * CLK_ADJ )
 
 #define _CALIBRATE
 
@@ -544,17 +543,22 @@ void interrup_t1() {
 
   // calibracion
   // stty -F /dev/ttyUSB0 raw ;  ts "%.s" < /dev/ttyUSB0  | \
-  // awk 'BEGIN {t=0} ; ! /V/ {if (t==0) {s=$1;t=$3} else {print "s:"$1" t:"$3" T:"($1-s)/($3-t)*1000}}'
-
+  // awk 'BEGIN {t=0} ; ! /V/ {if (t==0) {s=$5;t=$1} else {print "s:"$5" t:"$1" T:"($5-s)/($1-t)*1000}}'
+  // stty -F /dev/ttyUSB0 raw ;  ts "%.s" < /dev/ttyUSB0  | \
+  // awk 'BEGIN {t=0} ;
+  //    ! /V/ {if (t<30) {t=$1;m=$2;mc=$3} else {print "rt:"$1-t" m:"($2-m)/1000" mc:"($3-mc)/1000" adj:"($1-t)/($2-m)*1000}}'
+  
 #ifdef _CALIBRATE
   if( ticks % 1000 == 0) { // cada 1000 ticks 
     Serial.print(millis()); // OJO con el cambio de frecuencia del timer0 !!!
     Serial.print(" ");
-    Serial.print(ticks);
+    Serial.print((unsigned long)compensated_millis());
     Serial.print(" ");
     Serial.print(micros());
     Serial.print(" ");
     Serial.print((unsigned long)compensated_micros());
+    Serial.print(" ");
+    Serial.print(ticks);
     Serial.print(" ");
     Serial.print(last_ar_step);
     Serial.print(" ");
